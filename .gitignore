@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+venv/
+__pycache__/
+*.db
+*.spec.bak
+backend/attachments/
+.DS_Store
+*.log

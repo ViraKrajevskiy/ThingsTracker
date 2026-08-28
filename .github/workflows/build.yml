@@ -1,0 +1,66 @@
+name: Build ThingTracker
+
+# Собирает установочные файлы под Windows, macOS и Linux.
+# Запуск: вкладка Actions -> Build ThingTracker -> Run workflow,
+# либо автоматически при создании тега вида v0.1.0.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+          - os: ubuntu-latest
+            name: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm install
+          npm run build
+
+      - name: Build backend binary (PyInstaller)
+        run: |
+          cd backend
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --noconfirm --clean thingtracker.spec
+
+      - name: Install electron deps
+        run: npm install
+
+      - name: Build desktop app (electron-builder)
+        run: npx electron-builder --publish never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: thingtracker-${{ matrix.name }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: warn

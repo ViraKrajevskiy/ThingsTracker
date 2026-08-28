@@ -1,0 +1,51 @@
+{
+  "name": "thingtracker",
+  "version": "0.1.0",
+  "description": "Кросс-платформенный P2P трекер задач (Trello + YouTrack)",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev:frontend": "cd frontend && npm install && npm run dev",
+    "dev:electron": "electron .",
+    "dev": "concurrently \"npm:dev:frontend\" \"npm:dev:electron\"",
+    "build:frontend": "cd frontend && npm install && npm run build",
+    "build:backend": "cd backend && pyinstaller --noconfirm --clean thingtracker.spec",
+    "dist": "npm run build:frontend && npm run build:backend && electron-builder",
+    "postinstall": "cd frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.fleet.thingtracker",
+    "productName": "ThingTracker",
+    "files": [
+      "electron/**",
+      "frontend/dist/**"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office"
+    }
+  }
+}
