@@ -12,14 +12,19 @@ const BOARD_TYPES = [
 ]
 
 // mode: 'create' -> name + type + color ; 'edit' -> name + color (type fixed)
-export default function BoardModal({ mode = 'create', board, defaults, onClose, onSubmit }) {
+export default function BoardModal({ mode = 'create', board, defaults, onClose, onSubmit, onDelete }) {
+  const [confirmDel, setConfirmDel] = React.useState(false)
   const [name, setName] = useState(board?.name || '')
   const [type, setType] = useState(board?.board_type || defaults?.board_type || 'kanban')
   const [color, setColor] = useState(board?.color || defaults?.color || '#00D4FF')
+  const [rolesEnabled, setRolesEnabled] = useState(board ? board.roles_enabled !== 0 : true)
+  const [requireApproval, setRequireApproval] = useState(board ? board.require_approval !== 0 : true)
+  const [acceptMembers, setAcceptMembers] = useState(board ? board.accept_members !== 0 : true)
 
   const submit = () => {
     if (!name.trim()) return
-    onSubmit({ name: name.trim(), board_type: type, color })
+    onSubmit({ name: name.trim(), board_type: type, color,
+      roles_enabled: rolesEnabled ? 1 : 0, require_approval: requireApproval ? 1 : 0, accept_members: acceptMembers ? 1 : 0 })
   }
 
   return (
@@ -65,7 +70,33 @@ export default function BoardModal({ mode = 'create', board, defaults, onClose, 
           ))}
         </div>
 
+        {mode === 'edit' && (
+          <>
+            <label className="field-label">Доступ к доске</label>
+            <div className="toggle-row" onClick={() => setRolesEnabled(v => !v)}>
+              <span className={'toggle' + (rolesEnabled ? ' on' : '')}><span className="toggle-knob"></span></span>
+              <div className="toggle-text"><b>Роли и права</b><span>Выкл — все участники равны и могут всё</span></div>
+            </div>
+            <div className="toggle-row" onClick={() => setRequireApproval(v => !v)}>
+              <span className={'toggle' + (requireApproval ? ' on' : '')}><span className="toggle-knob"></span></span>
+              <div className="toggle-text"><b>Одобрение при входе</b><span>Выкл — по ссылке заходят сразу, без одобрения</span></div>
+            </div>
+            <div className="toggle-row" onClick={() => setAcceptMembers(v => !v)}>
+              <span className={'toggle' + (acceptMembers ? ' on' : '')}><span className="toggle-knob"></span></span>
+              <div className="toggle-text"><b>Приём новых участников</b><span>Выкл — доска закрыта, присоединиться нельзя</span></div>
+            </div>
+          </>
+        )}
+
         <div className="modal-actions">
+          {mode === 'edit' && onDelete && (confirmDel ? (
+            <span className="list-confirm">
+              <button className="lc-yes" onClick={onDelete}>Удалить доску</button>
+              <button className="lc-no" onClick={() => setConfirmDel(false)}>×</button>
+            </span>
+          ) : (
+            <button className="btn-danger" onClick={() => setConfirmDel(true)}>Удалить доску</button>
+          ))}
           <div style={{ flex: 1 }}></div>
           <button className="btn-ghost" onClick={onClose}>Отмена</button>
           <button className="btn-primary" onClick={submit}>

@@ -19,5 +19,6 @@ export const IconMenu = (p) => <S {...p}><path d="M4 6h16M4 12h16M4 18h16" /></S
 export const IconChevronLeft = (p) => <S {...p}><path d="M15 6l-6 6 6 6" /></S>
 export const IconPlus = (p) => <S {...p}><path d="M12 5v14M5 12h14" /></S>
 export const IconClose = (p) => <S {...p}><path d="M6 6l12 12M18 6L6 18" /></S>
+export const IconPoll = (p) => <S {...p}><path d="M4 20V10M10 20V4M16 20v-7M4 20h16" /></S>
 export const IconLink = (p) => <S {...p}><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.5 1.5" /><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7l1.5-1.5" /></S>
 export const IconFile = (p) => <S {...p}><path d="M14 3v5h5M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V8l-6-5z" /></S>

@@ -12,6 +12,9 @@
     "dist": "npm run build:frontend && npm run build:backend && electron-builder",
     "postinstall": "cd frontend && npm install"
   },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
   "devDependencies": {
     "concurrently": "^9.0.0",
     "electron": "^32.0.0",
@@ -20,9 +23,17 @@
   "build": {
     "appId": "com.fleet.thingtracker",
     "productName": "ThingTracker",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ViraKrajevskiy",
+        "repo": "ThingsTracker"
+      }
+    ],
     "files": [
       "electron/**",
-      "frontend/dist/**"
+      "frontend/dist/**",
+      "node_modules/**"
     ],
     "extraResources": [
       {
@@ -32,12 +43,20 @@
     ],
     "win": {
       "target": [
-        "portable",
-        "nsis"
+        "nsis",
+        "portable"
       ]
     },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
+    },
     "mac": {
-      "target": "dmg",
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.productivity"
     },
     "linux": {

@@ -7,7 +7,10 @@ import SettingsModal from './components/SettingsModal.jsx'
 import AuthScreen from './components/AuthScreen.jsx'
 import JoinScreen from './components/JoinScreen.jsx'
 import Notifications from './components/Notifications.jsx'
+import UpdateButton from './components/UpdateButton.jsx'
+import InviteModal from './components/InviteModal.jsx'
 import Card from './components/Card.jsx'
+import SwimlanesView from './components/SwimlanesView.jsx'
 import { IconMenu, IconChevronLeft, IconGear, IconPalette, IconLink } from './components/Icons.jsx'
 
 export default function App() {
@@ -30,9 +33,21 @@ export default function App() {
   const [listText, setListText] = useState('')
   const [boardModal, setBoardModal] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [inviteLink, setInviteLink] = useState(null)
+  const [expandedLists, setExpandedLists] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('tt_expanded') || '[]')) } catch { return new Set() }
+  })
+  const toggleExpand = (id) => setExpandedLists((prev) => {
+    const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id)
+    try { localStorage.setItem('tt_expanded', JSON.stringify([...n])) } catch {}
+    return n
+  })
   const [renamingList, setRenamingList] = useState(null)
   const [renameText, setRenameText] = useState('')
   const [confirmDelList, setConfirmDelList] = useState(null)
+  const [boardMenuId, setBoardMenuId] = useState(null)
+  const [renamingBoardId, setRenamingBoardId] = useState(null)
+  const [renameBoardText, setRenameBoardText] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
 
   const activeRef = useRef(null)
@@ -112,15 +127,25 @@ export default function App() {
   }, [currentUser, loadBoard, reloadBoard, refreshBoards, loadStatuses])
 
   const myRole = board?.my_role || null
-  const readOnly = myRole === 'viewer'
   const isBoardAdmin = myRole === 'admin'
+  const perms = board?.my_perms || {}
+  const canCreate = isBoardAdmin || !!perms.create_cards
+  const canEdit = isBoardAdmin || !!perms.edit_cards
+  const canMove = isBoardAdmin || !!perms.move_cards
+  const canDelete = isBoardAdmin || !!perms.delete_cards
+  const canDeadline = isBoardAdmin || !!perms.set_deadline
+  const canColumns = isBoardAdmin || !!perms.manage_columns
+  const canSwimlanes = isBoardAdmin || !!perms.manage_swimlanes
+  const canMembers = isBoardAdmin || !!perms.manage_members
+  const canComment = isBoardAdmin || !!perms.comment
+  const readOnly = !canCreate && !canEdit && !canMove && !canDelete && !canColumns
 
   const onDragEnd = async (result) => {
-    if (readOnly) return
     const { source, destination, draggableId, type } = result
     if (!destination) return
     if (source.droppableId === destination.droppableId && source.index === destination.index) return
     if (type === 'list') {
+      if (!canColumns) return
       setBoard((prev) => {
         const next = structuredClone(prev)
         const [moved] = next.lists.splice(source.index, 1)
@@ -130,16 +155,30 @@ export default function App() {
       await api.moveList(draggableId, destination.index)
       return
     }
+    if (!canMove) return
+    const parseId = (id) => {
+      if (id.startsWith('sl__')) {
+        const parts = id.split('__')
+        return { listId: parts[1], swimlaneId: parts[2] === 'none' ? null : parts[2] }
+      }
+      return { listId: id, swimlaneId: undefined }
+    }
+    const src = parseId(source.droppableId)
+    const dst = parseId(destination.droppableId)
     setBoard((prev) => {
       const next = structuredClone(prev)
-      const srcList = next.lists.find(l => l.id === source.droppableId)
-      const dstList = next.lists.find(l => l.id === destination.droppableId)
-      const [moved] = srcList.cards.splice(source.index, 1)
+      const srcList = next.lists.find(l => l.id === src.listId)
+      const dstList = next.lists.find(l => l.id === dst.listId)
+      if (!srcList || !dstList) return prev
+      const idx = srcList.cards.findIndex(c => c.id === draggableId)
+      if (idx < 0) return prev
+      const [moved] = srcList.cards.splice(idx, 1)
       moved.list_id = dstList.id
+      if (dst.swimlaneId !== undefined) moved.swimlane_id = dst.swimlaneId
       dstList.cards.splice(destination.index, 0, moved)
       return next
     })
-    await api.moveCard(draggableId, destination.droppableId, destination.index)
+    await api.moveCard(draggableId, dst.listId, destination.index, dst.swimlaneId)
   }
 
   const submitCard = async (listId) => {
@@ -164,19 +203,32 @@ export default function App() {
   }
   const copyInvite = async () => {
     const n = await api.netInfo()
-    const host = (n && !n.error) ? `http://${n.ip}:${n.port}` : window.location.origin
-    const link = `${host}/?join=${activeBoardId}`
-    try { await navigator.clipboard.writeText(link) } catch {}
-    alert('Ссылка-приглашение скопирована:\n' + link + '\n\nОтправь её человеку — он откроет, зарегистрируется и запросит доступ.')
+    const ip = (n && !n.error) ? n.ip : window.location.hostname
+    const port = (n && !n.error) ? n.port : (window.location.port || '8766')
+    const tailscaleIp = (n && !n.error) ? (n.tailscale_ip || null) : null
+    setInviteLink({ ip, port, tailscaleIp, boardId: activeBoardId })
   }
 
-  const submitBoardModal = async ({ name, board_type, color }) => {
+  const deleteBoard = async (id) => {
+    const target = id || activeBoardId
+    await api.deleteBoard(target)
+    setBoardModal(null); setBoardMenuId(null)
+    const bs = await api.boards(); setBoards(bs)
+    if (target === activeBoardId) { setActiveBoardId(bs.length ? bs[0].id : null); setBoard(null) }
+  }
+  const submitBoardRename = async (id) => {
+    const t = renameBoardText.trim()
+    if (t) { await api.updateBoard(id, { name: t }); await refreshBoards(); if (id === activeBoardId) loadBoard(activeBoardId) }
+    setRenamingBoardId(null)
+  }
+
+  const submitBoardModal = async ({ name, board_type, color, roles_enabled, require_approval, accept_members }) => {
     if (boardModal === 'create') {
       const ws = await api.workspaces()
       const b = await api.createBoard(ws[0].id, name, board_type, color)
       await refreshBoards(); setActiveBoardId(b.id)
     } else {
-      await api.updateBoard(activeBoardId, { name, color })
+      await api.updateBoard(activeBoardId, { name, color, roles_enabled, require_approval, accept_members })
       await loadBoard(activeBoardId); await refreshBoards()
     }
     setBoardModal(null)
@@ -203,17 +255,32 @@ export default function App() {
         <div className="side-label">Доски</div>
         <nav className="board-nav">
           {boards.map(b => (
-            <button key={b.id}
-              className={'board-nav-item' + (b.id === activeBoardId ? ' active' : '')}
-              style={{ '--nav-accent': b.color || '#00D4FF' }}
-              onClick={() => setActiveBoardId(b.id)}>
+            <div key={b.id} className={'board-nav-item' + (b.id === activeBoardId ? ' active' : '')}
+              style={{ '--nav-accent': b.color || '#00D4FF' }}>
               <span className="nav-dot" style={{ background: b.color || '#00D4FF' }}></span>
-              {b.name}
-            </button>
+              {renamingBoardId === b.id ? (
+                <input className="inline-input board-rename" autoFocus value={renameBoardText}
+                  onChange={(e) => setRenameBoardText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submitBoardRename(b.id); if (e.key === 'Escape') setRenamingBoardId(null) }}
+                  onBlur={() => submitBoardRename(b.id)} />
+              ) : (
+                <span className="board-nav-name" onClick={() => setActiveBoardId(b.id)}
+                  onDoubleClick={() => { setRenamingBoardId(b.id); setRenameBoardText(b.name) }}>{b.name}</span>
+              )}
+              <button className="board-menu-btn" onClick={(e) => { e.stopPropagation(); setBoardMenuId(boardMenuId === b.id ? null : b.id) }}>⋯</button>
+              {boardMenuId === b.id && (
+                <div className="board-menu" onMouseLeave={() => setBoardMenuId(null)}>
+                  <button onClick={() => { setRenamingBoardId(b.id); setRenameBoardText(b.name); setBoardMenuId(null) }}>Переименовать</button>
+                  <button onClick={() => { setActiveBoardId(b.id); setBoardModal('edit'); setBoardMenuId(null) }}>Дизайн</button>
+                  <button className="danger" onClick={() => { if (confirm('Удалить доску «' + b.name + '»?')) deleteBoard(b.id) }}>Удалить</button>
+                </div>
+              )}
+            </div>
           ))}
           <button className="board-nav-add" onClick={async () => { setSettings(await api.settings()); setBoardModal('create') }}>+ Новая доска</button>
         </nav>
         <div className="side-footer">
+          <UpdateButton />
           <button className="settings-link" onClick={() => setShowSettings(true)}><IconGear size={15} /> Настройки</button>
           <div className="presence">
             <span className={'dot ' + (connected ? 'on' : 'off')}></span>
@@ -244,7 +311,7 @@ export default function App() {
                 {isBoardAdmin && <button className="btn-icon" title="Пригласить (ссылка)" onClick={copyInvite}><IconLink size={17} /></button>}
                 {isBoardAdmin && <button className="btn-icon" title="Дизайн доски" onClick={() => setBoardModal('edit')}><IconPalette size={17} /></button>}
                 <button className="btn-icon" title="Настройки и статусы" onClick={() => setShowSettings(true)}><IconGear size={17} /></button>
-                {!readOnly && (addingList ? (
+                {canColumns && (addingList ? (
                   <input className="inline-input header-input" autoFocus value={listText}
                     placeholder="Название списка"
                     onChange={(e) => setListText(e.target.value)}
@@ -257,13 +324,20 @@ export default function App() {
             </header>
 
             <DragDropContext onDragEnd={onDragEnd}>
+              {board.swimlane_mode && board.swimlane_mode !== 'off' ? (
+                <SwimlanesView board={board} members={members} statuses={statuses} accent={accent}
+                  canEdit={canEdit} canMove={canMove} canDelete={canDelete} canCreate={canCreate} canSwimlanes={canSwimlanes}
+                  onOpenCard={setOpenCard} onReload={reloadBoard}
+                  onAddCard={async (listId, title, swimlaneId) => { const r = await api.createCard(listId, title); if (r && r.id && swimlaneId) await api.updateCard(r.id, { swimlane_id: swimlaneId }); reloadBoard() }}
+                  api={api} />
+              ) : (
               <Droppable droppableId="board" direction="horizontal" type="list">
                 {(bp) => (
                   <div className="lists" ref={bp.innerRef} {...bp.droppableProps}>
                     {board.lists.map((list, li) => (
-                      <Draggable draggableId={list.id} index={li} key={list.id} isDragDisabled={readOnly}>
+                      <Draggable draggableId={list.id} index={li} key={list.id} isDragDisabled={!canColumns}>
                         {(lp) => (
-                          <div className="list" ref={lp.innerRef} {...lp.draggableProps}>
+                          <div className={'list' + (expandedLists.has(list.id) ? ' expanded' : '')} ref={lp.innerRef} {...lp.draggableProps}>
                             <div className="list-head" {...lp.dragHandleProps}>
                               <span className="list-accent" style={{ background: accent }}></span>
                               {renamingList === list.id ? (
@@ -273,11 +347,12 @@ export default function App() {
                                   onBlur={() => submitRename(list.id)} />
                               ) : (
                                 <span className="list-name"
-                                  onDoubleClick={() => { if (!readOnly) { setRenamingList(list.id); setRenameText(list.name) } }}
-                                  title={readOnly ? '' : 'Двойной клик — переименовать'}>{list.name}</span>
+                                  onDoubleClick={() => { if (canColumns) { setRenamingList(list.id); setRenameText(list.name) } }}
+                                  title={canColumns ? 'Двойной клик — переименовать' : ''}>{list.name}</span>
                               )}
                               <span className="list-count">{list.cards.length}</span>
-                              {!readOnly && (confirmDelList === list.id ? (
+                              <button className="list-expand" title={expandedLists.has(list.id) ? 'Свернуть' : 'Развернуть колонку'} onClick={(e) => { e.stopPropagation(); toggleExpand(list.id) }}>{expandedLists.has(list.id) ? '▾' : '▸'}</button>
+                              {canColumns && (confirmDelList === list.id ? (
                                 <span className="list-confirm">
                                   <button className="lc-yes" onClick={() => doDeleteList(list.id)}>Удалить</button>
                                   <button className="lc-no" onClick={() => setConfirmDelList(null)}>×</button>
@@ -291,16 +366,16 @@ export default function App() {
                                 <div className={'list-cards' + (snap.isDraggingOver ? ' over' : '')}
                                   ref={cp.innerRef} {...cp.droppableProps}>
                                   {list.cards.map((card, i) => (
-                                    <Draggable key={card.id} draggableId={card.id} index={i} isDragDisabled={readOnly}>
+                                    <Draggable key={card.id} draggableId={card.id} index={i} isDragDisabled={!canMove}>
                                       {(prov) => (
-                                        <Card card={card} members={members} statuses={statuses} canWrite={!readOnly}
+                                        <Card card={card} members={members} statuses={statuses} canEdit={canEdit} canMove={canMove} canDelete={canDelete}
                                           dragProps={prov} onOpen={setOpenCard}
                                           onChanged={() => reloadBoard()} />
                                       )}
                                     </Draggable>
                                   ))}
                                   {cp.placeholder}
-                                  {!readOnly && (addingCardIn === list.id ? (
+                                  {canCreate && (addingCardIn === list.id ? (
                                     <textarea className="inline-input card-input" autoFocus value={cardText}
                                       placeholder="Что нужно сделать?"
                                       onChange={(e) => setCardText(e.target.value)}
@@ -321,25 +396,30 @@ export default function App() {
                     ))}
                     {bp.placeholder}
                     {board.lists.length === 0 && (
-                      <div className="empty-board">В этой доске пока нет колонок.{!readOnly ? ' Нажми «+ Список».' : ''}</div>
+                      <div className="empty-board">В этой доске пока нет колонок.{canColumns ? ' Нажми «+ Список».' : ''}</div>
                     )}
                   </div>
                 )}
               </Droppable>
+              )}
             </DragDropContext>
           </>
         ) : (<div className="empty">Загрузка…</div>)}
       </main>
 
       {openCard && (
-        <CardModal card={openCard} members={members} statuses={statuses} canWrite={!readOnly}
+        <CardModal card={openCard} members={members} statuses={statuses} canEdit={canEdit} canMove={canMove} canDelete={canDelete} canDeadline={canDeadline} canComment={canComment}
           onClose={() => setOpenCard(null)}
           onSaved={() => { setOpenCard(null); loadBoard(activeBoardId) }} />
       )}
       {boardModal && (
         <BoardModal mode={boardModal} board={boardModal === 'edit' ? board : null}
           defaults={{ board_type: settings.default_board_type, color: settings.default_color }}
-          onClose={() => setBoardModal(null)} onSubmit={submitBoardModal} />
+          onClose={() => setBoardModal(null)} onSubmit={submitBoardModal}
+          onDelete={boardModal === 'edit' ? deleteBoard : null} />
+      )}
+      {inviteLink && (
+        <InviteModal net={inviteLink} boardName={board?.name} onClose={() => setInviteLink(null)} />
       )}
       {showSettings && (
         <SettingsModal currentUser={currentUser} activeBoard={board}

@@ -17,7 +17,7 @@ def get_comments(card_id: str):
 
 @router.post("/api/cards/{card_id}/comments")
 async def add_comment(card_id: str, data: CommentIn, user: dict = Depends(auth.require_user)):
-    auth.require_write(user, auth.board_of_card(card_id))
+    auth.require_perm(user, auth.board_of_card(card_id), 'comment')
     cid = db.new_id()
     t = db.now()
     with db.get_conn() as conn:

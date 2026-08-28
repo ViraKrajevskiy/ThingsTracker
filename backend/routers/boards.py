@@ -35,6 +35,10 @@ def get_board_full(board_id: str):
             """SELECT a.card_id, COUNT(*) AS n FROM attachments a
                JOIN cards c ON c.id=a.card_id JOIN lists l ON l.id=c.list_id
                WHERE l.board_id=? GROUP BY a.card_id""", (board_id,)).fetchall()}
+        polls = {r["card_id"] for r in conn.execute(
+            """SELECT DISTINCT po.card_id FROM poll_options po
+               JOIN cards c ON c.id=po.card_id JOIN lists l ON l.id=c.list_id
+               WHERE l.board_id=?""", (board_id,)).fetchall()}
         com = {r["card_id"]: r["n"] for r in conn.execute(
             """SELECT cm.card_id, COUNT(*) AS n FROM comments cm
                JOIN cards c ON c.id=cm.card_id JOIN lists l ON l.id=c.list_id
@@ -43,10 +47,14 @@ def get_board_full(board_id: str):
         for c in cards:
             c["attachment_count"] = att.get(c["id"], 0)
             c["comment_count"] = com.get(c["id"], 0)
+            c["is_poll"] = c["id"] in polls
             by_list.setdefault(c["list_id"], []).append(c)
         for l in lists:
             l["cards"] = by_list.get(l["id"], [])
+        swimlanes = [db.dict_from_row(r) for r in conn.execute(
+            "SELECT * FROM swimlanes WHERE board_id=? ORDER BY position", (board_id,)).fetchall()]
         board["lists"] = lists
+        board["swimlanes"] = swimlanes
         return board
 
 
@@ -65,24 +73,33 @@ def get_members():
 
 
 @router.get("/api/boards")
-def get_boards(workspace_id: Optional[str] = None):
+def get_boards(workspace_id: Optional[str] = None, user: dict = Depends(auth.require_user)):
+    is_owner = user.get("global_role") == "owner"
     with db.get_conn() as conn:
+        params = []
+        sql = "SELECT b.* FROM boards b WHERE b.archived=0"
+        if not is_owner:
+            # non-owners see only boards they are a member of
+            sql += " AND b.id IN (SELECT board_id FROM board_members WHERE user_id=?)"
+            params.append(user["id"])
         if workspace_id:
-            rows = conn.execute(
-                "SELECT * FROM boards WHERE workspace_id=? AND archived=0 ORDER BY position",
-                (workspace_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute("SELECT * FROM boards WHERE archived=0 ORDER BY position").fetchall()
+            sql += " AND b.workspace_id=?"
+            params.append(workspace_id)
+        sql += " ORDER BY b.position"
+        rows = conn.execute(sql, params).fetchall()
         return [db.dict_from_row(r) for r in rows]
 
 
 @router.get("/api/boards/{board_id}")
 def get_board(board_id: str, authorization: Optional[str] = Header(None)):
+    user = auth.optional_user(authorization)
+    role = auth.board_role(user, board_id) if user else None
+    if role is None:
+        raise HTTPException(status_code=403, detail="Нет доступа к этой доске")
     data = get_board_full(board_id)
     if isinstance(data, dict) and "error" not in data:
-        user = auth.optional_user(authorization)
-        data["my_role"] = auth.board_role(user, board_id) if user else None
+        data["my_role"] = role
+        data["my_perms"] = auth.get_permissions(user, board_id)
     return data
 
 
@@ -120,3 +137,18 @@ async def update_board(board_id: str, data: BoardUpdate, user: dict = Depends(au
         conn.execute(f"UPDATE boards SET {sets} WHERE id=?", list(fields.values()) + [board_id])
     await manager.broadcast({"type": "board_updated", "board_id": board_id})
     return get_board_full(board_id)
+
+
+@router.delete("/api/boards/{board_id}")
+async def delete_board(board_id: str, user: dict = Depends(auth.require_user)):
+    if not auth.is_board_admin(user, board_id):
+        raise HTTPException(403, "Только админ доски может её удалить")
+    with db.get_conn() as conn:
+        # remove cards -> lists -> memberships/requests -> board
+        conn.execute("DELETE FROM cards WHERE list_id IN (SELECT id FROM lists WHERE board_id=?)", (board_id,))
+        conn.execute("DELETE FROM lists WHERE board_id=?", (board_id,))
+        conn.execute("DELETE FROM board_members WHERE board_id=?", (board_id,))
+        conn.execute("DELETE FROM board_join_requests WHERE board_id=?", (board_id,))
+        conn.execute("DELETE FROM boards WHERE id=?", (board_id,))
+    await manager.broadcast({"type": "board_deleted", "board_id": board_id})
+    return {"ok": True}

@@ -1,7 +1,7 @@
 """User management (admin) + per-board membership & roles."""
 from fastapi import APIRouter, Depends, HTTPException
 import database as db
-import auth
+import auth, json
 from models import UserCreate, UserUpdate, BoardMemberIn
 
 router = APIRouter()
@@ -73,30 +73,48 @@ def delete_user(user_id: str, user: dict = Depends(require_owner)):
 def board_members(board_id: str, user: dict = Depends(auth.require_user)):
     with db.get_conn() as conn:
         rows = conn.execute(
-            """SELECT bm.role, u.id, u.username, u.display_name, u.color, u.global_role, u.activated
+            """SELECT bm.role, bm.permissions, u.id, u.username, u.display_name, u.color, u.global_role, u.activated
                FROM board_members bm JOIN users u ON u.id = bm.user_id WHERE bm.board_id=?""",
             (board_id,),
         ).fetchall()
-        return [db.dict_from_row(r) for r in rows]
+        out = []
+        for r in rows:
+            d = db.dict_from_row(r)
+            try:
+                d["permissions"] = json.loads(d.get("permissions") or "{}")
+            except Exception:
+                d["permissions"] = {}
+            out.append(d)
+        return out
 
 
 @router.post("/api/boards/{board_id}/members")
 def add_board_member(board_id: str, data: BoardMemberIn, user: dict = Depends(auth.require_user)):
-    if not auth.is_board_admin(user, board_id):
-        raise HTTPException(403, "Только админ доски может добавлять участников")
+    if not (auth.is_board_admin(user, board_id) or auth.can(user, board_id, "manage_members")):
+        raise HTTPException(403, "Недостаточно прав для управления участниками")
+    # default permissions by role when not explicitly provided
+    if data.permissions is not None:
+        base = auth.default_perms(data.role)
+        perms = {k: (bool(data.permissions[k]) if k in data.permissions else base[k]) for k in auth.PERM_KEYS}
+    else:
+        perms = auth.default_perms(data.role)
+    pj = json.dumps(perms)
     with db.get_conn() as conn:
         conn.execute(
-            "INSERT INTO board_members (board_id, user_id, role) VALUES (?,?,?) "
-            "ON CONFLICT(board_id, user_id) DO UPDATE SET role=?",
-            (board_id, data.user_id, data.role, data.role),
+            "INSERT INTO board_members (board_id, user_id, role, permissions) VALUES (?,?,?,?) "
+            "ON CONFLICT(board_id, user_id) DO UPDATE SET role=?, permissions=?",
+            (board_id, data.user_id, data.role, pj, data.role, pj),
         )
+        # granting access directly resolves any pending join request (removes it from notifications)
+        conn.execute("UPDATE board_join_requests SET status='approved' WHERE board_id=? AND user_id=? AND status='pending'",
+                     (board_id, data.user_id))
     return {"ok": True}
 
 
 @router.delete("/api/boards/{board_id}/members/{user_id}")
 def remove_board_member(board_id: str, user_id: str, user: dict = Depends(auth.require_user)):
-    if not auth.is_board_admin(user, board_id):
-        raise HTTPException(403, "Только админ доски может удалять участников")
+    if not (auth.is_board_admin(user, board_id) or auth.can(user, board_id, "manage_members")):
+        raise HTTPException(403, "Недостаточно прав для управления участниками")
     with db.get_conn() as conn:
         conn.execute("DELETE FROM board_members WHERE board_id=? AND user_id=?", (board_id, user_id))
     return {"ok": True}

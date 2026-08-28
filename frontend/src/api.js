@@ -13,7 +13,13 @@ export function getToken() { return _token }
 async function req(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) }
   if (_token) headers['Authorization'] = 'Bearer ' + _token
-  const res = await fetch(BASE + path, { ...opts, headers })
+  let res
+  try {
+    res = await fetch(BASE + path, { ...opts, headers })
+  } catch (e) {
+    // backend unreachable — never let this throw and freeze the UI
+    return { error: 'Нет связи с сервером', network: true }
+  }
   let data = null
   try { data = await res.json() } catch {}
   if (!res.ok) return { error: (data && data.detail) || res.status, status: res.status }
@@ -32,6 +38,7 @@ export const api = {
 
   // join flow
   netInfo: () => req('/api/net-info'),
+  publicIp: () => req('/api/public-ip'),
   boardPublic: (id) => req(`/api/boards/${id}/public`),
   myAccess: (id) => req(`/api/boards/${id}/my-access`),
   requestJoin: (id) => req(`/api/boards/${id}/join-request`, { method: 'POST' }),
@@ -53,8 +60,8 @@ export const api = {
 
   // board members
   boardMembers: (boardId) => req(`/api/boards/${boardId}/members`),
-  addBoardMember: (boardId, user_id, role) =>
-    req(`/api/boards/${boardId}/members`, { method: 'POST', body: JSON.stringify({ user_id, role }) }),
+  addBoardMember: (boardId, user_id, role, permissions) =>
+    req(`/api/boards/${boardId}/members`, { method: 'POST', body: JSON.stringify({ user_id, role, permissions }) }),
   removeBoardMember: (boardId, userId) =>
     req(`/api/boards/${boardId}/members/${userId}`, { method: 'DELETE' }),
 
@@ -65,13 +72,20 @@ export const api = {
   createBoard: (workspace_id, name, board_type = 'kanban', color = '#00D4FF') =>
     req('/api/boards', { method: 'POST', body: JSON.stringify({ workspace_id, name, board_type, color }) }),
   updateBoard: (id, data) => req(`/api/boards/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteBoard: (id) => req(`/api/boards/${id}`, { method: 'DELETE' }),
   createList: (board_id, name) => req('/api/lists', { method: 'POST', body: JSON.stringify({ board_id, name }) }),
   updateList: (id, name) => req(`/api/lists/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   moveList: (list_id, position) => req('/api/lists/move', { method: 'POST', body: JSON.stringify({ list_id, position }) }),
   deleteList: (id) => req(`/api/lists/${id}`, { method: 'DELETE' }),
   createCard: (list_id, title) => req('/api/cards', { method: 'POST', body: JSON.stringify({ list_id, title }) }),
   updateCard: (id, data) => req(`/api/cards/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  moveCard: (card_id, list_id, position) => req('/api/cards/move', { method: 'POST', body: JSON.stringify({ card_id, list_id, position }) }),
+  moveCard: (card_id, list_id, position, swimlane_id) => req('/api/cards/move', { method: 'POST', body: JSON.stringify({ card_id, list_id, position, swimlane_id: swimlane_id === undefined ? null : swimlane_id }) }),
+  swimlanes: (boardId) => req(`/api/boards/${boardId}/swimlanes`),
+  createSwimlane: (boardId, name, color) => req(`/api/boards/${boardId}/swimlanes`, { method: 'POST', body: JSON.stringify({ name, color }) }),
+  updateSwimlane: (id, data) => req(`/api/swimlanes/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteSwimlane: (id) => req(`/api/swimlanes/${id}`, { method: 'DELETE' }),
+  reorderSwimlanes: (board_id, order) => req('/api/swimlanes/reorder', { method: 'POST', body: JSON.stringify({ board_id, order }) }),
+  setSwimlaneMode: (boardId, swimlane_mode, swimlane_field) => req(`/api/boards/${boardId}/swimlane-mode`, { method: 'PATCH', body: JSON.stringify({ swimlane_mode, swimlane_field }) }),
   deleteCard: (id) => req(`/api/cards/${id}`, { method: 'DELETE' }),
   workspaces: () => req('/api/workspaces'),
 
@@ -97,10 +111,17 @@ export const api = {
     fd.append('file', fileObj)
     const headers = {}
     if (_token) headers['Authorization'] = 'Bearer ' + _token
-    const res = await fetch(`${BASE}/api/cards/${cardId}/attachments`, { method: 'POST', body: fd, headers })
-    return res.json()
+    try {
+      const res = await fetch(`${BASE}/api/cards/${cardId}/attachments`, { method: 'POST', body: fd, headers })
+      return res.json()
+    } catch (e) { return { error: 'Нет связи с сервером', network: true } }
   },
   attachmentUrl: (id) => `${BASE}/api/attachments/${id}`,
   attachmentDownloadUrl: (id) => `${BASE}/api/attachments/${id}?download=1`,
   deleteAttachment: (id) => req(`/api/attachments/${id}`, { method: 'DELETE' }),
+
+  // polls
+  poll: (cardId) => req(`/api/cards/${cardId}/poll`),
+  setPoll: (cardId, multi, options) => req(`/api/cards/${cardId}/poll`, { method: 'POST', body: JSON.stringify({ multi, options }) }),
+  votePoll: (cardId, option_ids) => req(`/api/cards/${cardId}/vote`, { method: 'POST', body: JSON.stringify({ option_ids }) }),
 }
