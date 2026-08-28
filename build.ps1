@@ -1,32 +1,32 @@
-# ThingTracker — сборка Windows-приложения (portable .exe + установщик).
-# Запуск из корня проекта:
-#   powershell -ExecutionPolicy Bypass -File build.ps1
-# Требуется: Node.js и Python (у тебя уже есть).
+# ThingTracker - build Windows app (portable .exe + installer).
+# Run: powershell -ExecutionPolicy Bypass -File build.ps1
 $ErrorActionPreference = "Stop"
+$root = $PSScriptRoot
 
-# выбираем python из venv, если он есть (там уже все зависимости)
-$py = ".\backend\venv\Scripts\python.exe"
+$py = Join-Path $root "backend\venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { $py = "python" }
 
-Write-Host "== 1/4 Фронтенд ==" -ForegroundColor Cyan
-Push-Location frontend
+Write-Host "== 1/4 Frontend ==" -ForegroundColor Cyan
+Push-Location (Join-Path $root "frontend")
 npm install
 npm run build
 Pop-Location
 
-Write-Host "== 2/4 Бэкенд (PyInstaller) ==" -ForegroundColor Cyan
-Push-Location backend
+Write-Host "== 2/4 Backend (PyInstaller) ==" -ForegroundColor Cyan
+Push-Location (Join-Path $root "backend")
 & $py -m pip install --quiet -r requirements.txt pyinstaller
 & $py -m PyInstaller --noconfirm --clean thingtracker.spec
-if (-not (Test-Path "dist\thingtracker-backend.exe")) { throw "Бэкенд не собрался (нет dist\thingtracker-backend.exe)" }
+if (-not (Test-Path (Join-Path $root "backend\dist\thingtracker-backend.exe"))) { throw "Backend build failed" }
 Pop-Location
 
-Write-Host "== 3/4 Зависимости Electron ==" -ForegroundColor Cyan
+Write-Host "== 3/4 Electron deps ==" -ForegroundColor Cyan
+Push-Location $root
 npm install
 
-Write-Host "== 4/4 Упаковка приложения ==" -ForegroundColor Cyan
+Write-Host "== 4/4 Packaging ==" -ForegroundColor Cyan
 npx electron-builder --win --publish never
+Pop-Location
 
 Write-Host ""
-Write-Host "ГОТОВО. Файлы в папке dist\ :" -ForegroundColor Green
-Get-ChildItem dist\*.exe | ForEach-Object { Write-Host ("  " + $_.Name) -ForegroundColor Green }
+Write-Host "DONE. Files in dist folder:" -ForegroundColor Green
+Get-ChildItem (Join-Path $root "dist\*.exe") | ForEach-Object { Write-Host ("  " + $_.Name) -ForegroundColor Green }
