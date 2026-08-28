@@ -19,7 +19,7 @@ import database as db
 from config import HTTP_PORT
 from discovery import start_mdns
 from realtime import router as ws_router
-from routers import boards, lists, cards, statuses, comments, settings
+from routers import boards, lists, cards, statuses, comments, settings, polls, swimlanes
 from routers import auth_router, users, join, notifications
 try:
     from routers import attachments
@@ -50,7 +50,7 @@ def health():
 
 
 # feature routers
-for r in (auth_router, users, join, notifications, boards, lists, cards, statuses, comments, settings):
+for r in (auth_router, users, join, notifications, boards, lists, cards, statuses, comments, settings, polls, swimlanes):
     app.include_router(r.router)
 if _HAS_ATTACHMENTS:
     try:

@@ -1,34 +1,25 @@
-# ThingTracker - trigger GitHub Actions build for ALL OSes (Win/Mac/Linux).
-# Run: powershell -ExecutionPolicy Bypass -File release.ps1
-# Requires git and a GitHub repo with remote 'origin'.
+# ThingTracker - release a new version (build all OSes + publish to GitHub Releases,
+# so installed apps auto-update). Run: powershell -ExecutionPolicy Bypass -File release.ps1
 $ErrorActionPreference = "Stop"
 
-if (-not (Test-Path ".git")) {
-  Write-Host "Init git repo..." -ForegroundColor Cyan
-  git init | Out-Null
-  git add -A; git commit -m "ThingTracker" | Out-Null
-}
-$hasRemote = (git remote 2>$null) -contains "origin"
-if (-not $hasRemote) {
-  Write-Host "No 'origin' remote. Create an empty repo on github.com and run:" -ForegroundColor Yellow
-  Write-Host "  git remote add origin https://github.com/USER/REPO.git" -ForegroundColor Yellow
-  Write-Host "Then run release.ps1 again." -ForegroundColor Yellow
+if (-not (git remote | Select-String origin)) {
+  Write-Host "No 'origin' remote. Run: git remote add origin https://github.com/USER/REPO.git" -ForegroundColor Yellow
   exit 1
 }
 
-Write-Host "Commit + push..." -ForegroundColor Cyan
+# commit any pending changes
 git add -A
-git commit -m "release build" 2>$null | Out-Null
+git commit -m "changes before release" 2>$null | Out-Null
 git branch -M main 2>$null
 git push -u origin main
 
-$gh = Get-Command gh -ErrorAction SilentlyContinue
-if ($gh) {
-  gh workflow run "Build ThingTracker"
-  Write-Host "Started. Check the Actions tab on GitHub (Win/Mac/Linux files)." -ForegroundColor Green
-} else {
-  $tag = "v0.0." + [int](Get-Date -UFormat %s)
-  git tag $tag
-  git push origin $tag
-  Write-Host "Started via tag $tag. Check the Actions tab on GitHub." -ForegroundColor Green
-}
+# bump patch version, create tag vX.Y.Z, commit
+npm version patch -m "release %s"
+
+# push branch + the new tag -> triggers the workflow to build & publish a Release
+git push
+git push --tags
+
+Write-Host ""
+Write-Host "Release started. GitHub is building all OSes and publishing to Releases." -ForegroundColor Green
+Write-Host "Installed apps will auto-update to the new version." -ForegroundColor Green

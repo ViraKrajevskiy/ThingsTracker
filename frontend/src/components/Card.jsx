@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { api } from '../api.js'
-import { IconUser, IconCalendar, IconTrash, IconPaperclip, IconComment } from './Icons.jsx'
+import { IconUser, IconCalendar, IconTrash, IconPaperclip, IconComment, IconPoll } from './Icons.jsx'
 
 const PRIORITY_COLOR = { low: '#7A97C8', normal: '#35D0F0', high: '#FFC26B', urgent: '#FF7BA6' }
 
@@ -10,7 +10,7 @@ function fmtDate(ts) {
 }
 function toInputDate(ts) { return ts ? new Date(ts * 1000).toISOString().slice(0, 10) : '' }
 
-export default function Card({ card, members, statuses, onOpen, onChanged, dragProps, canWrite = true }) {
+export default function Card({ card, members, statuses, onOpen, onChanged, dragProps, canEdit = true, canMove = true, canDelete = true }) {
   const [menu, setMenu] = useState(null)
   const st = statuses.find(s => s.id === card.status) || statuses[0] || { label: '—', color: '#7A97C8' }
   const overdue = card.due_date && card.due_date * 1000 < Date.now() && card.status !== 'done'
@@ -26,23 +26,24 @@ export default function Card({ card, members, statuses, onOpen, onChanged, dragP
 
       <div className="card-top">
         <div className="card-title">{card.title}</div>
-        {canWrite && (
+        {(canEdit || canDelete) && (
           <div className="card-tools" onClick={(e) => e.stopPropagation()}>
-            <button className="ct-btn" title="Исполнитель" onClick={() => setMenu(menu === 'assignee' ? null : 'assignee')}><IconUser size={14} /></button>
-            <button className="ct-btn" title="Дедлайн" onClick={() => setMenu(menu === 'due' ? null : 'due')}><IconCalendar size={14} /></button>
-            <button className="ct-btn danger" title="Удалить" onClick={remove}><IconTrash size={14} /></button>
+            {canEdit && <button className="ct-btn" title="Исполнитель" onClick={() => setMenu(menu === 'assignee' ? null : 'assignee')}><IconUser size={14} /></button>}
+            {canEdit && <button className="ct-btn" title="Дедлайн" onClick={() => setMenu(menu === 'due' ? null : 'due')}><IconCalendar size={14} /></button>}
+            {canDelete && <button className="ct-btn danger" title="Удалить" onClick={remove}><IconTrash size={14} /></button>}
           </div>
         )}
       </div>
 
       <div className="card-foot" onClick={(e) => e.stopPropagation()}>
-        <button className={'status-badge' + (canWrite ? ' clickable' : '')} style={{ '--sc': st.color }}
-          onClick={() => { if (canWrite) setMenu(menu === 'status' ? null : 'status') }}>
+        <button className={'status-badge' + (canMove ? ' clickable' : '')} style={{ '--sc': st.color }}
+          onClick={() => { if (canMove) setMenu(menu === 'status' ? null : 'status') }}>
           <span className="status-dot" style={{ background: st.color }}></span>{st.label}
         </button>
         {card.due_date ? (
           <span className={'due-badge' + (overdue ? ' overdue' : '')}><IconCalendar size={11} /> {fmtDate(card.due_date)}</span>
         ) : null}
+        {card.is_poll ? <span className="card-ind poll"><IconPoll size={12} /> опрос</span> : null}
         {card.attachment_count > 0 ? <span className="card-ind"><IconPaperclip size={12} /> {card.attachment_count}</span> : null}
         {card.comment_count > 0 ? <span className="card-ind"><IconComment size={12} /> {card.comment_count}</span> : null}
         <span className="card-foot-spacer"></span>

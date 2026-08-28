@@ -22,7 +22,7 @@ def list_attachments(card_id: str):
 
 @router.post("/api/cards/{card_id}/attachments")
 async def upload_attachment(card_id: str, file: UploadFile = File(...), user: dict = Depends(auth.require_user)):
-    auth.require_write(user, auth.board_of_card(card_id))
+    auth.require_perm(user, auth.board_of_card(card_id), 'edit_cards')
     aid = db.new_id()
     ext = os.path.splitext(file.filename or "")[1]
     stored = aid + ext

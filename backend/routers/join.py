@@ -5,6 +5,7 @@ import database as db
 import auth
 import notify
 import discovery
+import json as _json
 from config import HTTP_PORT
 
 router = APIRouter()
@@ -16,8 +17,24 @@ class ApproveIn(BaseModel):
 
 @router.get("/api/net-info")
 def net_info():
-    """LAN address others use to reach this device."""
-    return {"ip": discovery._local_ip(), "port": HTTP_PORT}
+    """LAN address others use to reach this device (+ Tailscale IP if present)."""
+    return {"ip": discovery._local_ip(), "tailscale_ip": discovery._tailscale_ip(), "port": HTTP_PORT}
+
+
+@router.get("/api/public-ip")
+def public_ip():
+    """Best-effort public (WAN) IP for the port-forwarding option."""
+    import urllib.request
+    for url in ("https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"):
+        try:
+            with urllib.request.urlopen(url, timeout=4) as r:
+                ip = r.read().decode().strip()
+                parts = ip.split(".")
+                if len(parts) == 4 and all(o.isdigit() and 0 <= int(o) <= 255 for o in parts):
+                    return {"ip": ip}
+        except Exception:
+            continue
+    return {"ip": None}
 
 
 @router.get("/api/boards/{board_id}/public")
@@ -46,17 +63,32 @@ def request_join(board_id: str, user: dict = Depends(auth.require_user)):
     if auth.board_role(user, board_id):
         return {"state": "member"}
     with db.get_conn() as conn:
-        board = conn.execute("SELECT name FROM boards WHERE id=?", (board_id,)).fetchone()
+        board = conn.execute("SELECT name, accept_members, require_approval FROM boards WHERE id=?", (board_id,)).fetchone()
         if not board:
             raise HTTPException(404, "Доска не найдена")
-        existing = conn.execute(
-            "SELECT * FROM board_join_requests WHERE board_id=? AND user_id=? AND status='pending'",
-            (board_id, user["id"])).fetchone()
-        if not existing:
-            conn.execute("INSERT INTO board_join_requests (id, board_id, user_id, status, requested_at) VALUES (?,?,?,?,?)",
-                         (db.new_id(), board_id, user["id"], "pending", db.now()))
+        if board["accept_members"] == 0:
+            raise HTTPException(403, "Доска закрыта для новых участников")
+        bname = board["name"]
+        auto = board["require_approval"] == 0
+        if auto:
+            perms = _json.dumps(auth.default_perms("member"))
+            conn.execute("INSERT INTO board_members (board_id, user_id, role, permissions) VALUES (?,?,?,?) "
+                         "ON CONFLICT(board_id, user_id) DO NOTHING", (board_id, user["id"], "member", perms))
+        else:
+            existing = conn.execute(
+                "SELECT * FROM board_join_requests WHERE board_id=? AND user_id=? AND status='pending'",
+                (board_id, user["id"])).fetchone()
+            if not existing:
+                conn.execute("INSERT INTO board_join_requests (id, board_id, user_id, status, requested_at) VALUES (?,?,?,?,?)",
+                             (db.new_id(), board_id, user["id"], "pending", db.now()))
+    # notify AFTER the transaction is closed (avoid SQLite write lock)
+    if auto:
+        notify.notify_board_admins(board_id, "member_joined",
+                                   f"{user['display_name']} присоединился(ась) к доске «{bname}»",
+                                   {"board_id": board_id}, exclude=user["id"])
+        return {"state": "member"}
     notify.notify_board_admins(board_id, "join_request",
-                               f"{user['display_name']} запрашивает доступ к доске «{board['name']}»",
+                               f"{user['display_name']} запрашивает доступ к доске «{bname}»",
                                {"board_id": board_id, "user_id": user["id"]})
     return {"state": "pending"}
 

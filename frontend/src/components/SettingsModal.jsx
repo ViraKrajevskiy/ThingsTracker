@@ -45,9 +45,32 @@ export default function SettingsModal({ onClose, onChanged, currentUser, activeB
   }
   const delUser = async (id) => { await api.deleteUser(id); loadUsers() }
 
-  const setMemberRole = async (userId, role) => { await api.addBoardMember(activeBoard.id, userId, role); loadMembers() }
   const removeMember = async (userId) => { await api.removeBoardMember(activeBoard.id, userId); loadMembers() }
   const memberRole = (uid) => bmembers.find(m => m.id === uid)?.role
+  const memberPerms = (uid) => bmembers.find(m => m.id === uid)?.permissions || {}
+  const setAccess = async (userId, role, permissions) => { await api.addBoardMember(activeBoard.id, userId, role, permissions); loadMembers() }
+  const toggleAdmin = async (u) => {
+    if (memberRole(u.id) === 'admin') await setAccess(u.id, 'member', {})
+    else await setAccess(u.id, 'admin', null)
+  }
+  const togglePerm = async (u, key) => {
+    const cur = memberPerms(u.id)
+    const next = { ...cur, [key]: !cur[key] }
+    const anyOn = Object.values(next).some(Boolean)
+    if (!anyOn && memberRole(u.id) !== 'admin') await removeMember(u.id)
+    else await setAccess(u.id, 'member', next)
+  }
+  const PERM_LABELS = [
+    { k: 'create_cards', l: 'Создавать' },
+    { k: 'edit_cards', l: 'Редактировать' },
+    { k: 'move_cards', l: 'Перемещать' },
+    { k: 'delete_cards', l: 'Удалять' },
+    { k: 'set_deadline', l: 'Дедлайны' },
+    { k: 'manage_columns', l: 'Колонки' },
+    { k: 'manage_swimlanes', l: 'Свимлейны' },
+    { k: 'manage_members', l: 'Участники' },
+    { k: 'comment', l: 'Комментарии' },
+  ]
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -111,19 +134,30 @@ export default function SettingsModal({ onClose, onChanged, currentUser, activeB
             {!isBoardAdmin && <p className="hint">Управлять участниками может только админ доски.</p>}
             {users.length === 0 && isOwner ? <p className="hint">Сначала создай пользователей во вкладке «Пользователи».</p> : null}
             <div className="member-list">
-              {(isOwner ? users : bmembers).map(u => {
+              {(isOwner ? users : bmembers).filter(u => u.id !== currentUser.id).map(u => {
                 const role = memberRole(u.id)
+                const perms = memberPerms(u.id)
+                const isAdm = role === 'admin'
+                const hasAccess = !!role
                 return (
-                  <div className="member-row" key={u.id}>
-                    <span className="mini-avatar" style={{ background: u.color }}>{u.display_name[0]}</span>
-                    <span className="member-name">{u.display_name} <span className="member-login">@{u.username}</span></span>
-                    <select className="role-select" value={role || ''} disabled={!isBoardAdmin}
-                      onChange={(e) => e.target.value ? setMemberRole(u.id, e.target.value) : removeMember(u.id)}>
-                      <option value="">— нет доступа —</option>
-                      <option value="admin">Админ</option>
-                      <option value="member">Участник</option>
-                      <option value="viewer">Наблюдатель</option>
-                    </select>
+                  <div className="perm-row" key={u.id}>
+                    <div className="perm-head">
+                      <span className="mini-avatar" style={{ background: u.color }}>{u.display_name[0]}</span>
+                      <span className="member-name">{u.display_name} <span className="member-login">@{u.username}</span></span>
+                      {hasAccess ? <button className="perm-remove" disabled={!isBoardAdmin} onClick={() => removeMember(u.id)}>убрать</button> : null}
+                    </div>
+                    <div className="perm-checks">
+                      <label className={'perm-chk admin' + (isAdm ? ' on' : '')}>
+                        <input type="checkbox" checked={isAdm} disabled={!isBoardAdmin} onChange={() => toggleAdmin(u)} /> Админ
+                      </label>
+                      {PERM_LABELS.map(pl => (
+                        <label key={pl.k} className={'perm-chk' + ((isAdm || perms[pl.k]) ? ' on' : '')}>
+                          <input type="checkbox" checked={isAdm || !!perms[pl.k]} disabled={!isBoardAdmin || isAdm}
+                            onChange={() => togglePerm(u, pl.k)} /> {pl.l}
+                        </label>
+                      ))}
+                    </div>
+                    {!hasAccess && <div className="perm-noaccess">нет доступа к доске</div>}
                   </div>
                 )
               })}

@@ -127,6 +127,22 @@ CREATE TABLE IF NOT EXISTS notifications (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS poll_options (
+    id TEXT PRIMARY KEY,
+    card_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS poll_votes (
+    id TEXT PRIMARY KEY,
+    card_id TEXT NOT NULL,
+    option_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS attachments (
     id TEXT PRIMARY KEY,
     card_id TEXT NOT NULL,
@@ -136,6 +152,15 @@ CREATE TABLE IF NOT EXISTS attachments (
     stored_name TEXT NOT NULL,
     created_at REAL NOT NULL,
     FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS swimlanes (
+  id TEXT PRIMARY KEY,
+  board_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '#7A97C8',
+  position INTEGER NOT NULL DEFAULT 0,
+  collapsed INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -175,6 +200,21 @@ def _migrate(conn):
             conn.execute(sql)
         except Exception:
             pass  # column already exists
+    for sql in [
+        "ALTER TABLE board_members ADD COLUMN permissions TEXT DEFAULT '{}'",
+        "ALTER TABLE lists ADD COLUMN expanded INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE cards ADD COLUMN poll_multi INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE boards ADD COLUMN roles_enabled INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE boards ADD COLUMN require_approval INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE boards ADD COLUMN accept_members INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE cards ADD COLUMN swimlane_id TEXT",
+        "ALTER TABLE boards ADD COLUMN swimlane_mode TEXT NOT NULL DEFAULT 'off'",
+        "ALTER TABLE boards ADD COLUMN swimlane_field TEXT",
+    ]:
+        try:
+            conn.execute(sql)
+        except Exception:
+            pass
     indexes = [
         "CREATE INDEX IF NOT EXISTS idx_lists_board ON lists(board_id)",
         "CREATE INDEX IF NOT EXISTS idx_cards_list ON cards(list_id)",
@@ -183,6 +223,11 @@ def _migrate(conn):
         "CREATE INDEX IF NOT EXISTS idx_board_members_board ON board_members(board_id)",
         "CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read)",
         "CREATE INDEX IF NOT EXISTS idx_join_board ON board_join_requests(board_id, status)",
+        "CREATE INDEX IF NOT EXISTS idx_poll_options_card ON poll_options(card_id)",
+        "CREATE INDEX IF NOT EXISTS idx_poll_votes_card ON poll_votes(card_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_poll_vote_uniq ON poll_votes(option_id, user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_swimlanes_board ON swimlanes(board_id)",
+        "CREATE INDEX IF NOT EXISTS idx_cards_swimlane ON cards(swimlane_id)",
     ]
     for sql in indexes:
         try:

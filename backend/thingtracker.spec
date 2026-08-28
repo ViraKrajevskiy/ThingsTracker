@@ -19,6 +19,9 @@ hiddenimports += [
     "routers", "routers.auth_router", "routers.users", "routers.join",
     "routers.notifications", "routers.boards", "routers.lists", "routers.cards",
     "routers.statuses", "routers.comments", "routers.attachments", "routers.settings",
+    "routers.polls",
+    "routers.swimlanes",
+    "psutil",
 ]
 
 # bundle the built frontend if present

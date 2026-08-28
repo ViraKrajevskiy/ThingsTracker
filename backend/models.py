@@ -14,6 +14,9 @@ class BoardUpdate(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
     board_type: Optional[str] = None
+    roles_enabled: Optional[int] = None
+    require_approval: Optional[int] = None
+    accept_members: Optional[int] = None
 
 
 class ListIn(BaseModel):
@@ -23,6 +26,7 @@ class ListIn(BaseModel):
 
 class ListUpdate(BaseModel):
     name: Optional[str] = None
+    expanded: Optional[int] = None
 
 
 class MoveList(BaseModel):
@@ -48,12 +52,14 @@ class CardUpdate(BaseModel):
     due_date: Optional[float] = None
     assignee: Optional[str] = None
     labels: Optional[list] = None
+    swimlane_id: Optional[str] = None
 
 
 class MoveCard(BaseModel):
     card_id: str
     list_id: str
     position: int
+    swimlane_id: Optional[str] = None
 
 
 class StatusIn(BaseModel):
@@ -102,3 +108,4 @@ class UserUpdate(BaseModel):
 class BoardMemberIn(BaseModel):
     user_id: str
     role: str = "member"
+    permissions: Optional[dict] = None

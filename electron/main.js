@@ -1,4 +1,6 @@
-const { app, BrowserWindow, Menu } = require('electron')
+const { app, BrowserWindow, Menu, dialog, ipcMain } = require('electron')
+let autoUpdater = null
+try { autoUpdater = require('electron-updater').autoUpdater } catch (e) { console.error('[updater] not available:', e.message) }
 const { spawn } = require('child_process')
 const path = require('path')
 const http = require('http')
@@ -8,12 +10,48 @@ const fs = require('fs')
 let pyProc = null
 let mainWindow = null
 let backendPort = 8766
+let pendingDeepLink = null
+
+// --- custom protocol: thingtracker://open?u=<url-encoded full invite url> ---
+const PROTOCOL = 'thingtracker'
+if (process.defaultApp) {
+  if (process.argv.length >= 2) {
+    try { app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]) } catch (e) {}
+  }
+} else {
+  try { app.setAsDefaultProtocolClient(PROTOCOL) } catch (e) {}
+}
+
+function urlFromDeepLink(link) {
+  try {
+    const u = new URL(link)
+    const target = u.searchParams.get('u')
+    if (target) {
+      const dec = decodeURIComponent(target)
+      if (/^https?:\/\//i.test(dec)) return dec
+    }
+  } catch (e) {}
+  return null
+}
+
+function handleDeepLink(link) {
+  if (!link) return
+  const target = urlFromDeepLink(link)
+  if (!target) return
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    loadWithRetry(mainWindow, target)
+    try { mainWindow.show(); mainWindow.focus() } catch (e) {}
+  } else {
+    pendingDeepLink = target
+  }
+}
+
 
 const isDev = !app.isPackaged
 const PREFERRED_PORT = 8766
 
 // ── port helpers ────────────────────────────────────────────────
-function isPortFree(port, host = '127.0.0.1') {
+function isPortFree(port, host = '0.0.0.0') {
   return new Promise((resolve) => {
     const srv = net.createServer()
     srv.once('error', () => resolve(false))
@@ -109,9 +147,66 @@ function createWindow(url) {
   mainWindow = new BrowserWindow({
     width: 1280, height: 820, minWidth: 900, minHeight: 600,
     backgroundColor: '#0A1628',
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, preload: path.join(__dirname, 'preload.js') },
   })
   loadWithRetry(mainWindow, url)
+}
+
+function sendStatus(status, extra) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update-status', Object.assign({ status }, extra || {}))
+  }
+}
+
+// Manual check button (from the UI)
+ipcMain.handle('check-for-updates', async () => {
+  if (isDev || !autoUpdater) { sendStatus('dev'); return { status: 'dev' } }
+  try { await autoUpdater.checkForUpdates(); return { status: 'checking' } }
+  catch (e) { sendStatus('error', { message: e.message }); return { status: 'error' } }
+})
+ipcMain.handle('restart-to-update', () => { if (autoUpdater) autoUpdater.quitAndInstall() })
+
+function setupAutoUpdate() {
+  if (isDev || !autoUpdater) return
+  autoUpdater.autoDownload = true
+  autoUpdater.on('checking-for-update', () => sendStatus('checking'))
+  autoUpdater.on('update-available', (info) => sendStatus('available', { version: info && info.version }))
+  autoUpdater.on('update-not-available', () => sendStatus('none'))
+  autoUpdater.on('download-progress', (p) => sendStatus('downloading', { percent: Math.round(p.percent || 0) }))
+  autoUpdater.on('update-downloaded', (info) => {
+    sendStatus('downloaded', { version: info && info.version })
+    dialog.showMessageBox({
+      type: 'info',
+      buttons: ['Перезапустить сейчас', 'Позже'],
+      defaultId: 0,
+      title: 'Обновление ThingTracker',
+      message: 'Доступна новая версия' + (info && info.version ? ' ' + info.version : ''),
+      detail: 'Обновление загружено. Перезапустить приложение, чтобы установить?',
+    }).then((r) => { if (r.response === 0) autoUpdater.quitAndInstall() })
+  })
+  autoUpdater.on('error', (e) => { console.error('[updater]', e == null ? 'unknown' : (e.message || e)); sendStatus('error', { message: e && e.message }) })
+  // check on startup + every hour
+  try { autoUpdater.checkForUpdates() } catch (e) { console.error('[updater]', e.message) }
+  setInterval(() => { try { autoUpdater.checkForUpdates() } catch (e) {} }, 60 * 60 * 1000)
+}
+
+// single instance — route protocol links into the running app
+const gotLock = app.requestSingleInstanceLock()
+if (!gotLock) {
+  app.quit()
+} else {
+  app.on('second-instance', (event, argv) => {
+    const link = argv.find(a => a.startsWith(PROTOCOL + '://'))
+    if (link) handleDeepLink(link)
+    else if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus() }
+  })
+}
+// macOS
+app.on('open-url', (event, link) => { event.preventDefault(); handleDeepLink(link) })
+// windows/linux cold start
+{
+  const coldLink = process.argv.find(a => a.startsWith(PROTOCOL + '://'))
+  if (coldLink) pendingDeepLink = urlFromDeepLink(coldLink)
 }
 
 app.whenReady().then(async () => {
@@ -130,6 +225,10 @@ app.whenReady().then(async () => {
       // UI is served by the backend itself -> same-origin, no port needed.
       createWindow(`http://127.0.0.1:${backendPort}/`)
     }
+    if (pendingDeepLink && mainWindow && !mainWindow.isDestroyed()) {
+      loadWithRetry(mainWindow, pendingDeepLink); pendingDeepLink = null
+    }
+    setupAutoUpdate()
   })
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

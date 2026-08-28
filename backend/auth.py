@@ -94,8 +94,69 @@ def board_role(user: dict, board_id: str) -> Optional[str]:
         return row["role"] if row else None
 
 
+import json as _json
+
+# capability keys (order matters — used for UI columns)
+PERM_KEYS = [
+    "create_cards", "edit_cards", "move_cards", "delete_cards", "set_deadline",
+    "manage_columns", "manage_swimlanes", "manage_members", "comment",
+]
+
+
+def default_perms(role: str) -> dict:
+    """Sensible defaults per role (used as fallback for keys not stored yet)."""
+    if role == "admin":
+        return {k: True for k in PERM_KEYS}
+    if role == "member":
+        return {
+            "create_cards": True, "edit_cards": True, "move_cards": True,
+            "delete_cards": False, "set_deadline": True, "manage_columns": False,
+            "manage_swimlanes": False, "manage_members": False, "comment": True,
+        }
+    # viewer / unknown
+    return {k: False for k in PERM_KEYS}
+
+
+def get_permissions(user: dict, board_id: str) -> dict:
+    """Effective granular permissions of user on a board."""
+    role = board_role(user, board_id)
+    if role == "admin":  # board admin / global owner -> everything
+        return {k: True for k in PERM_KEYS}
+    if not role:
+        return {k: False for k in PERM_KEYS}
+    # if roles are disabled on this board, every member gets full access
+    with db.get_conn() as conn:
+        b = conn.execute("SELECT roles_enabled FROM boards WHERE id=?", (board_id,)).fetchone()
+    if b and b["roles_enabled"] == 0:
+        return {k: True for k in PERM_KEYS}
+    # member/viewer -> read stored permissions json; fall back to role defaults for missing keys
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT permissions FROM board_members WHERE board_id=? AND user_id=?",
+                           (board_id, user["id"])).fetchone()
+    perms = {}
+    if row and row["permissions"]:
+        try:
+            perms = _json.loads(row["permissions"])
+        except Exception:
+            perms = {}
+    defaults = default_perms(role)
+    return {k: bool(perms[k]) if k in perms else defaults[k] for k in PERM_KEYS}
+
+
+def can(user: dict, board_id: str, key: str) -> bool:
+    if not user:
+        return False
+    return get_permissions(user, board_id).get(key, False)
+
+
+def require_perm(user: dict, board_id: str, key: str):
+    if not can(user, board_id, key):
+        raise HTTPException(status_code=403, detail="Недостаточно прав для этого действия")
+
+
 def can_write(user: dict, board_id: str) -> bool:
-    return board_role(user, board_id) in ("admin", "member")
+    p = get_permissions(user, board_id)
+    return any(p.values())
 
 
 def is_board_admin(user: dict, board_id: str) -> bool:

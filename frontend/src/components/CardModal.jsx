@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { api } from '../api.js'
 import Attachments from './Attachments.jsx'
 import { IconPaperclip } from './Icons.jsx'
+import Poll from './Poll.jsx'
 
 const PRIORITIES = [
   { v: 'low', label: 'Низкий', c: '#7A97C8' },
@@ -15,7 +16,7 @@ function fmtTime(ts) {
   return new Date(ts * 1000).toLocaleString('ru-RU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
 }
 
-export default function CardModal({ card, members, statuses, onClose, onSaved, canWrite = true }) {
+export default function CardModal({ card, members, statuses, onClose, onSaved, canEdit = true, canMove = true, canDelete = true, canComment = true, canDeadline = true }) {
   const [title, setTitle] = useState(card.title)
   const [description, setDescription] = useState(card.description || '')
   const [priority, setPriority] = useState(card.priority || 'normal')
@@ -87,6 +88,7 @@ export default function CardModal({ card, members, statuses, onClose, onSaved, c
                 </div>
               ))}
             </div>
+            {canComment ? (
             <div className="comment-add">
               <input ref={commentFileRef} type="file" multiple hidden
                 onChange={(e) => { if (e.target.files?.length) attachInComment(e.target.files) }} />
@@ -96,9 +98,13 @@ export default function CardModal({ card, members, statuses, onClose, onSaved, c
                 onKeyDown={(e) => { if (e.key === 'Enter') sendComment() }} />
               <button className="btn-primary sm" onClick={sendComment}>Отправить</button>
             </div>
+            ) : <div className="perm-noaccess">Нет прав комментировать</div>}
 
             <label className="field-label">Вложения</label>
             <Attachments cardId={card.id} key={attReload} />
+
+            <label className="field-label">Опрос</label>
+            <Poll cardId={card.id} api={api} canEdit={canEdit} />
           </div>
 
           <div className="modal-side">
@@ -129,15 +135,16 @@ export default function CardModal({ card, members, statuses, onClose, onSaved, c
             </select>
 
             <label className="field-label">Дедлайн</label>
-            <input type="date" className="modal-select" value={due} onChange={(e) => setDue(e.target.value)} />
+            <input type="date" className="modal-select" value={due} disabled={!canDeadline} onChange={(e) => setDue(e.target.value)} />
+            {!canDeadline && <div className="perm-noaccess">Нет прав ставить дедлайны</div>}
           </div>
         </div>
 
         <div className="modal-actions">
-          {canWrite && <button className="btn-danger" onClick={remove}>Удалить</button>}
+          {canDelete && <button className="btn-danger" onClick={remove}>Удалить</button>}
           <div style={{ flex: 1 }}></div>
-          <button className="btn-ghost" onClick={onClose}>{canWrite ? 'Отмена' : 'Закрыть'}</button>
-          {canWrite && <button className="btn-primary" onClick={save} disabled={saving}>
+          <button className="btn-ghost" onClick={onClose}>{(canEdit || canMove) ? 'Отмена' : 'Закрыть'}</button>
+          {(canEdit || canMove) && <button className="btn-primary" onClick={save} disabled={saving}>
             {saving ? 'Сохранение…' : 'Сохранить'}
           </button>}
         </div>

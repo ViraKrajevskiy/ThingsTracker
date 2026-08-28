@@ -67,7 +67,15 @@ jobs:
         run: npm install
 
       - name: Build desktop app (electron-builder)
-        run: npx electron-builder --publish never
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "Tag build -> publishing to GitHub Releases"
+            npx electron-builder --publish always
+          else
+            echo "Manual build -> artifacts only, no release"
+            npx electron-builder --publish never
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

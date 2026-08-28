@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.post("/api/lists")
 async def create_list(data: ListIn, user: dict = Depends(auth.require_user)):
-    auth.require_write(user, data.board_id)
+    auth.require_perm(user, data.board_id, 'manage_columns')
     lid = db.new_id()
     with db.get_conn() as conn:
         pos = conn.execute(
@@ -25,7 +25,7 @@ async def create_list(data: ListIn, user: dict = Depends(auth.require_user)):
 
 @router.patch("/api/lists/{list_id}")
 async def update_list(list_id: str, data: ListUpdate, user: dict = Depends(auth.require_user)):
-    auth.require_write(user, auth.board_of_list(list_id))
+    auth.require_perm(user, auth.board_of_list(list_id), 'manage_columns')
     fields = data.dict(exclude_unset=True)
     if not fields:
         return {"error": "nothing to update"}
@@ -38,7 +38,7 @@ async def update_list(list_id: str, data: ListUpdate, user: dict = Depends(auth.
 
 @router.post("/api/lists/move")
 async def move_list(data: MoveList, user: dict = Depends(auth.require_user)):
-    auth.require_write(user, auth.board_of_list(data.list_id))
+    auth.require_perm(user, auth.board_of_list(data.list_id), 'manage_columns')
     with db.get_conn() as conn:
         row = conn.execute("SELECT board_id FROM lists WHERE id=?", (data.list_id,)).fetchone()
         if not row:
@@ -55,7 +55,7 @@ async def move_list(data: MoveList, user: dict = Depends(auth.require_user)):
 
 @router.delete("/api/lists/{list_id}")
 async def delete_list(list_id: str, user: dict = Depends(auth.require_user)):
-    auth.require_write(user, auth.board_of_list(list_id))
+    auth.require_perm(user, auth.board_of_list(list_id), 'manage_columns')
     with db.get_conn() as conn:
         conn.execute("DELETE FROM cards WHERE list_id=?", (list_id,))
         conn.execute("DELETE FROM lists WHERE id=?", (list_id,))

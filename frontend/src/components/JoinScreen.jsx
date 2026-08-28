@@ -9,6 +9,10 @@ export default function JoinScreen({ boardId, onJoined, onFallback }) {
   const [displayName, setDisplayName] = useState('')
   const [err, setErr] = useState('')
   const poll = useRef(null)
+  const isDesktop = !!(window.electronAPI && window.electronAPI.isDesktop)
+  const openInApp = () => {
+    try { window.location.href = 'thingtracker://open?u=' + encodeURIComponent(window.location.href) } catch (e) {}
+  }
 
   useEffect(() => { (async () => { const b = await api.boardPublic(boardId); if (!b.error) setBoard(b); else setErr('Доска не найдена') })() }, [boardId])
 
@@ -46,6 +50,12 @@ export default function JoinScreen({ boardId, onJoined, onFallback }) {
         </div>
 
         {board && <div className="join-board">Присоединение к доске<br /><b style={{ color: board.color }}>{board.name}</b></div>}
+
+        {!isDesktop && (
+          <button className="open-in-app" onClick={openInApp} title="Открыть в установленном приложении ThingTracker">
+            Открыть в приложении ThingTracker
+          </button>
+        )}
 
         {phase === 'register' && (
           <>
