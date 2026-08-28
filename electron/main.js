@@ -58,6 +58,9 @@ function backendCommand() {
 }
 function startBackend(port) {
   const { cmd, args, cwd } = backendCommand()
+  if (!isDev && process.platform !== 'win32') {
+    try { fs.chmodSync(cmd, 0o755) } catch (e) { console.error('[backend] chmod failed:', e.message) }
+  }
   console.log('[backend] starting on port', port)
   pyProc = spawn(cmd, args, { cwd, env: { ...process.env, TT_PORT: String(port) } })
   pyProc.stdout.on('data', d => console.log('[backend]', d.toString().trim()))
@@ -95,9 +98,10 @@ function findViteServer(cb, ports = [5173, 5174, 5175, 5176, 5177], tries = 0) {
 }
 
 function loadWithRetry(win, url, tries = 0) {
+  if (!win || win.isDestroyed()) return
   win.loadURL(url).catch(() => {
     if (tries > 60) return
-    setTimeout(() => loadWithRetry(win, url, tries + 1), 500)
+    setTimeout(() => { if (win && !win.isDestroyed()) loadWithRetry(win, url, tries + 1) }, 500)
   })
 }
 

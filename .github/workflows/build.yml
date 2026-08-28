@@ -46,6 +46,23 @@ jobs:
           pip install -r requirements.txt pyinstaller
           pyinstaller --noconfirm --clean thingtracker.spec
 
+      - name: Smoke test backend binary
+        shell: bash
+        run: |
+          cd backend
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN="dist/thingtracker-backend.exe"; else BIN="dist/thingtracker-backend"; chmod +x "$BIN"; fi
+          TT_PORT=8766 TT_DB_PATH="$RUNNER_TEMP/tt.db" "./$BIN" &
+          PID=$!
+          ok=0
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8766/api/health >/dev/null; then ok=1; break; fi
+            sleep 1
+          done
+          echo "--- health ---"; curl -s http://127.0.0.1:8766/api/health || true
+          kill $PID 2>/dev/null || true
+          if [ "$ok" != "1" ]; then echo "BACKEND DID NOT RESPOND ON $RUNNER_OS"; exit 1; fi
+          echo "Backend OK on $RUNNER_OS"
+
       - name: Install electron deps
         run: npm install
 
